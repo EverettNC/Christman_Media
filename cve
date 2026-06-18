@@ -1,0 +1,475 @@
+#!/usr/bin/env python3
+"""
+Christman Video Engine (CVE) — CLI
+Offline-first video generation for the Christman AI family.
+Replaces CapCut. Zero subscriptions. Your voices. Your themes.
+"""
+
+from __future__ import annotations
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from modules.timeline import (
+    Timeline, Track, Clip, TrackType, TransitionType,
+    ResolutionPreset, Theme, STEAMPUNK_THEME, CINEMA_THEME,
+    HIGH_CONTRAST_THEME, NEUTRAL_THEME, create_lesson_template
+)
+from modules.generator import (
+    VideoGenerator, render_timeline, quick_render, RenderResult
+)
+from modules.captions import (
+    CaptionGenerator, CaptionStyle, CAPTION_STYLES,
+    fetch_latest_transcript_from_bridge, generate_captions_from_bridge
+)
+
+
+# --- Theme registry ---
+THEMES = {
+    "steampunk": STEAMPUNK_THEME,
+    "cinema": CINEMA_THEME,
+    "high_contrast": HIGH_CONTRAST_THEME,
+    "neutral": NEUTRAL_THEME,
+}
+
+# --- Caption style registry ---
+CAPTION_PRESETS = {k: v for k, v in CAPTION_STYLES.items()}
+
+
+def load_template(template_path: str, slots: dict) -> Timeline:
+    """Load JSON template and fill slots."""
+    with open(template_path, "r") as f:
+        data = json.load(f)
+
+    tl_data = data["timeline"]
+
+    # Simple slot replacement in JSON string
+    import re
+    json_str = json.dumps(tl_data)
+    for key, value in slots.items():
+        json_str = json_str.replace(f"{{{{{key}}}}}", str(value))
+    tl_data = json.loads(json_str)
+
+    # Reconstruct Timeline
+    tl = Timeline(
+        fps=tl_data.get("fps", 30),
+        resolution=ResolutionPreset[tl_data.get("resolution", "FHD_1080")],
+        theme=THEMES.get(tl_data.get("theme", "steampunk"), STEAMPUNK_THEME),
+        background_color=tl_data.get("background_color", "0x1a1a2e"),
+    )
+
+    for track_data in tl_data.get("tracks", []):
+        track = Track(TrackType(track_data["type"]))
+        track.volume = track_data.get("volume", 1.0)
+        track.enabled = track_data.get("enabled", True)
+
+        for clip_data in track_data.get("clips", []):
+            clip = Clip(
+                source=clip_data["source"],
+                start=clip_data.get("start", 0),
+                duration=clip_data.get("duration"),
+                trim_start=clip_data.get("trim_start", 0),
+                trim_end=clip_data.get("trim_end"),
+                scale_mode=clip_data.get("scale_mode", "fit"),
+                position=tuple(clip_data.get("position", [0, 0])),
+                opacity=clip_data.get("opacity", 1.0),
+                transition=TransitionType(clip_data.get("transition", "none")),
+                transition_duration=clip_data.get("transition_duration", 0.5),
+                effects=clip_data.get("effects", []),
+                tts_text=clip_data.get("tts_text"),
+                tts_voice=clip_data.get("tts_voice", "derek"),
+                tts_emotion=clip_data.get("tts_emotion", "neutral"),
+                subtitle_text=clip_data.get("subtitle_text"),
+                subtitle_style=clip_data.get("subtitle_style"),
+            )
+            track.add_clip(clip)
+
+        tl.add_track(track)
+
+    return tl
+
+
+def cmd_render(args):
+    """Render a timeline template or quick prompt."""
+    output_path = args.output or "data/output/render.mp4"
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    if args.template:
+        # Template-based render
+        slots = {}
+        if args.slots:
+            for slot in args.slots:
+                if "=" in slot:
+                    k, v = slot.split("=", 1)
+                    slots[k] = v
+
+        print(f"[CVE] Loading template: {args.template}")
+        print(f"[CVE] Slots: {slots}")
+        timeline = load_template(args.template, slots)
+
+    elif args.prompt:
+        # Quick prompt render
+        print(f"[CVE] Quick render: {args.prompt}")
+        theme = THEMES.get(args.theme, STEAMPUNK_THEME)
+        result = quick_render(
+            prompt=args.prompt,
+            output_path=output_path,
+            voice=args.voice,
+            emotion=args.emotion,
+            theme=theme,
+            duration=args.duration
+        )
+        _print_result(result)
+        return
+
+    else:
+        print("Error: --template or --prompt required")
+        sys.exit(1)
+
+    # Render with full pipeline
+    caption_style = CAPTION_PRESETS.get(args.caption_style, CAPTION_STYLES["kids_large"])
+    result = render_timeline(
+        timeline=timeline,
+        output_path=output_path,
+        work_dir=args.work_dir,
+        burn_captions=not args.no_captions,
+        caption_style=args.caption_style
+    )
+    _print_result(result)
+
+
+def cmd_captions(args):
+    """Generate captions from bridge transcript."""
+    print("[CVE] Fetching transcript from bridge...")
+    gen = generate_captions_from_bridge(
+        output_srt=args.output or "data/output/captions.srt",
+        style=args.style
+    )
+    if gen:
+        print(f"[CVE] Generated {len(gen.segments)} caption segments")
+    else:
+        print("[CVE] No transcript available")
+        sys.exit(1)
+
+
+def cmd_list(args):
+    """List available templates, themes, voices."""
+    any_shown = False
+
+    if args.templates:
+        templates_dir = PROJECT_ROOT / "assets" / "templates"
+        if templates_dir.exists():
+            for t in templates_dir.glob("*.json"):
+                with open(t) as f:
+                    data = json.load(f)
+                print(f"  {t.stem}: {data.get('description', '')}")
+                for slot in data.get("slots", []):
+                    req = " (required)" if slot.get("required") else ""
+                    default = f" [default: {slot.get('default')}]" if slot.get("default") else ""
+                    print(f"    --slot {slot['name']}={slot['type']}{req}{default}")
+        else:
+            print("No templates found")
+        any_shown = True
+
+    if args.themes:
+        for name, theme in THEMES.items():
+            print(f"  {name}: {theme.name}")
+        any_shown = True
+
+    if args.caption_styles:
+        for name in CAPTION_PRESETS:
+            print(f"  {name}")
+        any_shown = True
+
+    if args.voices:
+        # List voice profiles
+        profiles_dir = Path("/Users/EverettN/.christman_ai/voice_profiles")
+        if profiles_dir.exists():
+            for p in profiles_dir.glob("*.json"):
+                with open(p) as f:
+                    data = json.load(f)
+                print(f"  {data.get('id', p.stem)}: {data.get('name', '')} ({data.get('voice', {}).get('voice', '')})")
+        else:
+            print("No voice profiles found")
+        any_shown = True
+
+    if not any_shown:
+        print("Use --templates, --themes, --caption-styles, or --voices")
+
+
+def cmd_auto_edit(args):
+    """Auto-edit a source video into themed clips."""
+    from modules.auto_edit import auto_edit_video
+    
+    print(f"[CVE] Auto-editing: {args.input}")
+    print(f"[CVE] Clip duration: {args.clip_duration}s, Target: {args.target_duration}s")
+    print(f"[CVE] Theme: {args.theme}, Transition: {args.transition}")
+    
+    result = auto_edit_video(
+        input_path=args.input,
+        output_dir=args.output_dir or "data/output/auto_edit",
+        clip_duration=args.clip_duration,
+        target_duration=args.target_duration,
+        theme=args.theme,
+        transition=args.transition,
+        voice=args.voice,
+        emotion=args.emotion,
+        caption_style=args.caption_style,
+        add_intro=args.intro,
+        add_outro=args.outro,
+        bridge_transcript=args.bridge_transcript,
+    )
+    
+    if result.success:
+        print(f"\n✅ AUTO-EDIT COMPLETE")
+        print(f"   Output: {result.output_path}")
+        print(f"   Clips created: {result.clips_created}")
+        print(f"   Total duration: {result.total_duration:.1f}s")
+    else:
+        print(f"\n❌ AUTO-EDIT FAILED: {result.error}")
+        sys.exit(1)
+
+
+def cmd_highlight(args):
+    """Extract highlights from video using transcript/audio/scene analysis."""
+    from modules.highlights import extract_highlights
+    
+    print(f"[CVE] Extracting highlights from: {args.input}")
+    print(f"[CVE] Method: {args.method}, Max highlights: {args.max_highlights}")
+    
+    result = extract_highlights(
+        input_path=args.input,
+        output_dir=args.output_dir or "data/output/highlights",
+        method=args.method,
+        max_highlights=args.max_highlights,
+        min_duration=args.min_duration,
+        max_duration=args.max_duration,
+        theme=args.theme,
+        transition=args.transition,
+        caption_style=args.caption_style,
+    )
+    
+    if result.success:
+        print(f"\n✅ HIGHLIGHTS EXTRACTED: {result.highlights_found}")
+        for i, h in enumerate(result.highlights):
+            print(f"   {i+1}. {h.start:.1f}s-{h.end:.1f}s ({h.reason})")
+    else:
+        print(f"\n❌ HIGHLIGHT EXTRACTION FAILED: {result.error}")
+        sys.exit(1)
+
+
+def cmd_montage(args):
+    """Create montage from multiple videos."""
+    from modules.montage import create_montage
+    
+    inputs = args.inputs
+    print(f"[CVE] Creating montage from {len(inputs)} videos")
+    print(f"[CVE] Target duration: {args.target_duration}s, Theme: {args.theme}")
+    
+    result = create_montage(
+        input_paths=inputs,
+        output_path=args.output or "data/output/montage.mp4",
+        target_duration=args.target_duration,
+        clip_duration=args.clip_duration,
+        theme=args.theme,
+        transition=args.transition,
+        music=args.music,
+        caption_style=args.caption_style,
+        shuffle=args.shuffle,
+    )
+    
+    if result.success:
+        print(f"\n✅ MONTAGE COMPLETE")
+        print(f"   Output: {result.output_path}")
+        print(f"   Duration: {result.duration:.1f}s")
+    else:
+        print(f"\n❌ MONTAGE FAILED: {result.error}")
+        sys.exit(1)
+
+
+def cmd_batch(args):
+    """Batch process multiple videos with same template/settings."""
+    from modules.batch import batch_process
+    
+    input_dir = args.input_dir
+    template = args.template
+    print(f"[CVE] Batch processing: {input_dir}")
+    print(f"[CVE] Template: {template}")
+    
+    result = batch_process(
+        input_dir=input_dir,
+        template_path=template,
+        output_dir=args.output_dir or "data/output/batch",
+        slots=args.slots,
+        pattern=args.pattern,
+        parallel=args.parallel,
+    )
+    
+    print(f"\n✅ BATCH COMPLETE: {result.successful}/{result.total} successful")
+    for r in result.results:
+        status = "✅" if r.success else "❌"
+        print(f"   {status} {r.input_name} → {r.output_path or r.error}")
+
+
+def cmd_bridge(args):
+    """Bridge utilities."""
+    import urllib.request
+    import urllib.error
+
+    if args.health:
+        try:
+            with urllib.request.urlopen("http://localhost:8765/health", timeout=3) as r:
+                print(r.read().decode())
+        except Exception as e:
+            print(f"Bridge not reachable: {e}")
+
+    if args.transcript:
+        try:
+            with urllib.request.urlopen("http://localhost:8765/latest", timeout=3) as r:
+                data = json.loads(r.read().decode())
+                print(f"Transcript: {data.get('text', '(empty)')}")
+                print(f"Timestamp: {data.get('timestamp', 0)}")
+        except Exception as e:
+            print(f"Error: {e}")
+
+    if args.riley_status:
+        try:
+            with urllib.request.urlopen("http://localhost:8765/riley/status", timeout=3) as r:
+                print(r.read().decode())
+        except Exception as e:
+            print(f"Error: {e}")
+
+    if args.send_riley:
+        try:
+            payload = json.dumps({"text": args.send_riley}).encode()
+            req = urllib.request.Request(
+                "http://localhost:8765/riley/claude-response",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3) as r:
+                print(r.read().decode())
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+def _print_result(result: RenderResult):
+    if result.success:
+        print(f"\n✅ RENDER COMPLETE")
+        print(f"   Output: {result.output_path}")
+        print(f"   Duration: {result.duration:.2f}s")
+        print(f"   Size: {result.file_size / 1024 / 1024:.2f} MB")
+    else:
+        print(f"\n❌ RENDER FAILED")
+        print(f"   Error: {result.error}")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="cve",
+        description="Christman Video Engine — Offline-first video generation"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # render
+    p_render = subparsers.add_parser("render", help="Render video from template or prompt")
+    p_render.add_argument("--template", "-t", help="Template JSON file")
+    p_render.add_argument("--prompt", "-p", help="Quick text prompt")
+    p_render.add_argument("--output", "-o", help="Output file path")
+    p_render.add_argument("--slots", "-s", nargs="+", help="Template slots: key=value")
+    p_render.add_argument("--theme", default="steampunk", choices=list(THEMES.keys()))
+    p_render.add_argument("--voice", default="derek")
+    p_render.add_argument("--emotion", default="warm")
+    p_render.add_argument("--duration", type=float, default=10.0)
+    p_render.add_argument("--caption-style", default="kids_large", choices=list(CAPTION_PRESETS.keys()))
+    p_render.add_argument("--no-captions", action="store_true")
+    p_render.add_argument("--work-dir", default="data/temp")
+    p_render.set_defaults(func=cmd_render)
+
+    # captions
+    p_cap = subparsers.add_parser("captions", help="Generate captions from bridge")
+    p_cap.add_argument("--output", "-o", help="Output SRT path")
+    p_cap.add_argument("--style", default="kids_large", choices=list(CAPTION_PRESETS.keys()))
+    p_cap.set_defaults(func=cmd_captions)
+
+    # list
+    p_list = subparsers.add_parser("list", help="List templates, themes, voices")
+    p_list.add_argument("--templates", action="store_true")
+    p_list.add_argument("--themes", action="store_true")
+    p_list.add_argument("--caption-styles", action="store_true")
+    p_list.add_argument("--voices", action="store_true")
+    p_list.set_defaults(func=cmd_list)
+
+    # bridge
+    p_bridge = subparsers.add_parser("bridge", help="Bridge utilities")
+    p_bridge.add_argument("--health", action="store_true")
+    p_bridge.add_argument("--transcript", action="store_true")
+    p_bridge.add_argument("--riley-status", action="store_true")
+    p_bridge.add_argument("--send-riley", help="Send message to Riley")
+    p_bridge.set_defaults(func=cmd_bridge)
+
+    # auto-edit
+    p_auto = subparsers.add_parser("auto-edit", help="Auto-edit video into themed clips")
+    p_auto.add_argument("input", help="Input video file")
+    p_auto.add_argument("--output-dir", "-o", help="Output directory")
+    p_auto.add_argument("--clip-duration", type=float, default=15.0, help="Duration of each clip (seconds)")
+    p_auto.add_argument("--target-duration", type=float, default=60.0, help="Total target duration (seconds)")
+    p_auto.add_argument("--theme", default="steampunk", choices=list(THEMES.keys()))
+    p_auto.add_argument("--transition", default="fade", choices=["none", "fade", "xfade", "wipe", "zoom", "slide"])
+    p_auto.add_argument("--voice", default="derek")
+    p_auto.add_argument("--emotion", default="warm")
+    p_auto.add_argument("--caption-style", default="kids_large", choices=list(CAPTION_PRESETS.keys()))
+    p_auto.add_argument("--intro", action="store_true", help="Add intro clip")
+    p_auto.add_argument("--outro", action="store_true", help="Add outro clip")
+    p_auto.add_argument("--bridge-transcript", action="store_true", help="Use bridge transcript for captions")
+    p_auto.set_defaults(func=cmd_auto_edit)
+
+    # highlights
+    p_hl = subparsers.add_parser("highlights", help="Extract highlights from video")
+    p_hl.add_argument("input", help="Input video file")
+    p_hl.add_argument("--output-dir", "-o", help="Output directory")
+    p_hl.add_argument("--method", default="auto", choices=["auto", "transcript", "audio", "scene", "motion"], help="Detection method")
+    p_hl.add_argument("--max-highlights", type=int, default=10)
+    p_hl.add_argument("--min-duration", type=float, default=3.0)
+    p_hl.add_argument("--max-duration", type=float, default=30.0)
+    p_hl.add_argument("--theme", default="steampunk", choices=list(THEMES.keys()))
+    p_hl.add_argument("--transition", default="xfade", choices=["none", "fade", "xfade", "wipe", "zoom", "slide"])
+    p_hl.add_argument("--caption-style", default="kids_large", choices=list(CAPTION_PRESETS.keys()))
+    p_hl.set_defaults(func=cmd_highlight)
+
+    # montage
+    p_montage = subparsers.add_parser("montage", help="Create montage from multiple videos")
+    p_montage.add_argument("inputs", nargs="+", help="Input video files")
+    p_montage.add_argument("--output", "-o", help="Output file")
+    p_montage.add_argument("--target-duration", type=float, default=60.0)
+    p_montage.add_argument("--clip-duration", type=float, default=10.0)
+    p_montage.add_argument("--theme", default="steampunk", choices=list(THEMES.keys()))
+    p_montage.add_argument("--transition", default="xfade", choices=["none", "fade", "xfade", "wipe", "zoom", "slide"])
+    p_montage.add_argument("--music", help="Background music file")
+    p_montage.add_argument("--caption-style", default="kids_large", choices=list(CAPTION_PRESETS.keys()))
+    p_montage.add_argument("--shuffle", action="store_true")
+    p_montage.set_defaults(func=cmd_montage)
+
+    # batch
+    p_batch = subparsers.add_parser("batch", help="Batch process videos with template")
+    p_batch.add_argument("input_dir", help="Directory of input videos")
+    p_batch.add_argument("--template", "-t", required=True, help="Template JSON file")
+    p_batch.add_argument("--output-dir", "-o", help="Output directory")
+    p_batch.add_argument("--slots", "-s", nargs="*", help="Template slots: key=value")
+    p_batch.add_argument("--pattern", default="*.mp4", help="File pattern")
+    p_batch.add_argument("--parallel", type=int, default=2, help="Parallel jobs")
+    p_batch.set_defaults(func=cmd_batch)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

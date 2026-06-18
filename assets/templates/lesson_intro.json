@@ -1,0 +1,76 @@
+{
+  "name": "lesson_intro",
+  "description": "Standard lesson introduction template",
+  "version": "1.0",
+  "slots": [
+    {"name": "title", "type": "string", "description": "Lesson title", "required": true},
+    {"name": "voice_being", "type": "string", "description": "Voice being ID (derek, alphavox, etc.)", "default": "derek"},
+    {"name": "theme", "type": "string", "description": "Visual theme", "default": "steampunk"},
+    {"name": "duration", "type": "number", "description": "Intro duration in seconds", "default": 10}
+  ],
+  "timeline": {
+    "fps": 30,
+    "resolution": "FHD_1080",
+    "theme": "steampunk",
+    "background_color": "0x1a1a2e",
+    "tracks": [
+      {
+        "type": "video",
+        "clips": [
+          {
+            "source": "assets/backgrounds/steampunk_classroom.mp4",
+            "start": 0,
+            "duration": null,
+            "scale_mode": "fill"
+          },
+          {
+            "source": "TTS:{{title}}",
+            "start": 1.0,
+            "duration": 4.0,
+            "tts_text": "{{title}}",
+            "tts_voice": "{{voice_being}}",
+            "tts_emotion": "sweetheart",
+            "transition": "fade",
+            "transition_duration": 1.0
+          }
+        ]
+      },
+      {
+        "type": "tts",
+        "clips": [
+          {
+            "source": "TTS:Welcome to today's lesson on {{title}}.",
+            "start": 2.0,
+            "duration": 3.0,
+            "tts_text": "Welcome to today's lesson on {{title}}.",
+            "tts_voice": "{{voice_being}}",
+            "tts_emotion": "warm"
+          }
+        ]
+      },
+      {
+        "type": "subtitle",
+        "clips": [
+          {
+            "source": "",
+            "start": 2.0,
+            "duration": 3.0,
+            "subtitle_text": "Welcome to today's lesson on {{title}}.",
+            "subtitle_style": {"fontsize": 48, "color": "white", "outline": 2}
+          }
+        ]
+      },
+      {
+        "type": "audio",
+        "volume": 0.15,
+        "clips": [
+          {
+            "source": "assets/music/ambient_steampunk_loop.wav",
+            "start": 0,
+            "duration": null
+          }
+        ]
+      }
+    ]
+  }
+}
