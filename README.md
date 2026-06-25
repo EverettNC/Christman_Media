@@ -36,7 +36,7 @@ A complete **FFmpeg-first video engine** built on the **Christman Full Sensory B
 │  /ws/audio  → Live Whisper transcripts                      │
 │  /ws/video  → Live camera/screen frames                     │
 │  /ws/riley  → Riley sovereign tunnel                        │
-│  /ws/hermes → Hermes Agent presence                         │
+│  /ws/nexus  → Nexus Agent presence                          │
 │  /latest    → Recent transcript (for captions)              │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -191,7 +191,7 @@ ChristmanVideoEngine-main/
 **Authorize a being:**
 ```bash
 # Create profile in ~/.christman_ai/voice_profiles/{id}.json
-# Add to Hermes knowledge base
+# Add to Nexus knowledge base
 ./cve list --voices  # Shows authorized beings
 ```
 

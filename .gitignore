@@ -1,0 +1,39 @@
+cat << 'EOF' > .gitignore
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python Caches & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# uv Package Manager
+.uv/
+
+# Christman Video Engine specific
+logs/
+data/
+context_dump.txt
+
+# Generated Media (Don't push heavy outputs to Git)
+*.mp4
+*.mp3
+*.wav
+*.png
+*.jpg
+cve_output.mp4
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+EOF

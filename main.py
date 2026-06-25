@@ -36,12 +36,17 @@ def run_roadworthy_production(raw_user_prompt):
     brain = AgentBrain()
     final_prompt = brain.process_prompt(raw_user_prompt)
     
+    # Define where the generator should save the output file
+    target_destination = os.path.join(os.getcwd(), "cve_output.mp4")
+    
     # Retry logic for the Generator
     retries = 3
     for attempt in range(retries):
         watchdog_monitor(f"Generation Attempt {attempt + 1}")
         generator = VideoGenerator()
-        output_path = generator.create(final_prompt)
+ 
+        # Pass BOTH the prompt and the target output path
+        output_path = generator.create(final_prompt, target_destination)
         
         # Validation Check
         if output_path and os.path.getsize(output_path) > 1024: # Must be > 1KB
