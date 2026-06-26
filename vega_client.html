@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vega — Marketing PR</title>
+  <style>
+    :root {
+      --bg: #04060a; --panel: #0b0e14; --fg: #e8ecf4; --muted: #7a8499;
+      --teal: #1fc8b8; --amber: #f5a623; --border: #1f2a3a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body { background: var(--bg); color: var(--fg); font-family: var(--sans); padding: 24px; }
+    h1 { font-size: 22px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--teal); margin-bottom: 8px; }
+    .stat { font-size: 28px; font-weight: 700; }
+    .gaps { color: var(--amber); font-size: 12px; line-height: 1.6; margin-top: 8px; }
+    .queue { display: grid; gap: 12px; }
+    .post { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .post h3 { font-size: 14px; margin-bottom: 6px; }
+    .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .caption { font-size: 13px; line-height: 1.5; margin-top: 8px; color: #c5cdd9; }
+    button, a.btn {
+      display: inline-block; background: var(--teal); color: #041210; border: none;
+      border-radius: 8px; padding: 10px 14px; font-weight: 700; font-size: 12px;
+      text-decoration: none; cursor: pointer; margin-right: 8px;
+    }
+    .toolbar { margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Vega — Marketing PR</h1>
+  <div class="sub">FRS blueprint cockpit. Hook–Story–Offer content queue. Voice training is separate — this is presence and distribution.</div>
+  <div class="toolbar">
+    <a class="btn" href="/">← TCAP Portal</a>
+    <a class="btn" href="/api/vega/blueprint" target="_blank">FRS Blueprint PDF</a>
+    <button onclick="generateNow()">Generate slot now</button>
+    <button onclick="refresh()">Refresh</button>
+  </div>
+  <div class="grid" id="stats"></div>
+  <div class="eyebrow">Ready to post</div>
+  <div class="queue" id="queue">loading…</div>
+  <script>
+    async function refresh() {
+      const [status, queue] = await Promise.all([
+        fetch("/api/vega/status").then(r => r.json()),
+        fetch("/api/vega/queue").then(r => r.json()),
+      ]);
+      document.getElementById("stats").innerHTML = `
+        <div class="card"><div class="eyebrow">Queue</div><div class="stat">${queue.count || 0}</div>completed posts</div>
+        <div class="card"><div class="eyebrow">Images</div><div class="stat">${status.image_count || 0}</div>in vega_output</div>
+        <div class="card"><div class="eyebrow">Voice training</div><div class="stat" style="font-size:16px">epoch ${status.voice_training?.epoch ?? "—"}</div>independent of beings</div>
+        <div class="card"><div class="eyebrow">Gaps</div><div class="gaps">${(status.gaps || []).join("<br>") || "none — stack healthy"}</div></div>`;
+      const posts = queue.posts || [];
+      document.getElementById("queue").innerHTML = posts.length ? posts.map(p => `
+        <div class="post">
+          <h3>${(p.platform || "?").toUpperCase()} · ${p.being || p.topic || "TCAP"}</h3>
+          <div class="meta">${p.id || ""} · ${p.content_type || ""} · ${p.status || ""}</div>
+          <div class="meta">${p.file_path || p.metadata?.file_path || ""}</div>
+          <div class="caption">${(p.caption || p.prompt || "").slice(0, 280)}</div>
+        </div>`).join("") : "<div class='post'>No completed posts yet. Start Vega: <code>cd ~/vega && python3 -m vega.main</code></div>";
+    }
+    async function generateNow() {
+      const r = await fetch("/api/vega/generate", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({slot: 2, platform: "instagram"}),
+      });
+      const j = await r.json();
+      alert(j.message || j.reason || JSON.stringify(j));
+      refresh();
+    }
+    refresh();
+  </script>
+</body>
+</html>

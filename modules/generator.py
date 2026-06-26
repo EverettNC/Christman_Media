@@ -130,16 +130,23 @@ class VideoGenerator:
         """Generate TTS audio for all TTS clips. Returns map: clip_id -> audio_file_path."""
         tts_map = {}
 
-        # Import Voice SDK speak function
+        from engine.sound_init import bootstrap_sound
+
+        bootstrap_sound()
+        sdk_available = False
+        speak = None
         try:
-            from Christman_Sound.CHRISTMAN_EAR_CANAL import speak
+            from CHRISTMAN_EAR_CANAL import speak as ear_speak
+
+            speak = ear_speak
             sdk_available = True
         except ImportError:
+            pass
+        if not sdk_available:
             try:
                 from christman_voice_sdk import synthesize_speech, resolve_voice_params
                 sdk_available = True
             except ImportError:
-                sdk_available = False
                 print("[VideoGenerator] WARNING: Christman Voice SDK not available, TTS clips will be silent")
 
         if not sdk_available:
@@ -158,8 +165,10 @@ class VideoGenerator:
 
                     result = speak(
                         text=clip.tts_text,
-                        emotion=clip.tts_emotion,
-                        allow_fallback=True
+                        emotion=clip.tts_emotion or "warm",
+                        being=clip.tts_voice or "derek",
+                        allow_fallback=False,
+                        play=False,
                     )
 
                     if result.get("wav") and Path(result["wav"]).exists():
@@ -168,7 +177,11 @@ class VideoGenerator:
                         tts_map[clip_id] = str(output_wav)
                         print(f"[VideoGenerator] TTS saved: {output_wav}")
                     else:
-                        print(f"[VideoGenerator] WARNING: TTS generation failed for clip {clip_id}")
+                        err = result.get("xtts_error") or result.get("engine") or "unknown"
+                        print(
+                            f"[VideoGenerator] WARNING: TTS failed for {clip_id} "
+                            f"(being={clip.tts_voice}, emotion={clip.tts_emotion}): {err}"
+                        )
 
                 except Exception as e:
                     print(f"[VideoGenerator] ERROR generating TTS for {clip_id}: {e}")
@@ -371,8 +384,11 @@ class VideoGenerator:
         """Build filter chain for a single video clip (WITHOUT output label)."""
         filters = []
 
+        # Still images: hold frame for clip duration
+        if clip.source and self._is_image(clip.source) and clip.duration:
+            filters.append(f"fps={timeline.fps},trim=duration={clip.duration},setpts=PTS-STARTPTS")
         # Trim
-        if clip.trim_start > 0 or clip.trim_end is not None:
+        elif clip.trim_start > 0 or clip.trim_end is not None:
             trim_end = clip.trim_end if clip.trim_end is not None else clip.duration
             if trim_end and trim_end > clip.trim_start:
                 filters.append(f"trim=start={clip.trim_start}:end={trim_end},setpts=PTS-STARTPTS")
@@ -455,7 +471,19 @@ class VideoGenerator:
 
         return ";".join(chain_parts), final_label
 
+    def _is_image(self, path: str) -> bool:
+        return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+
+    def _should_loop_video(self, path: str) -> bool:
+        if not path or path.startswith("TTS:"):
+            return False
+        if self._is_image(path):
+            return False
+        return self._has_video(path) and path.endswith(".mp4")
+
     def _has_video(self, path: str) -> bool:
+        if self._is_image(path):
+            return True
         try:
             result = subprocess.run(
                 [self.ffprobe_bin, "-v", "error", "-select_streams", "v:0",
@@ -488,10 +516,14 @@ class VideoGenerator:
         """Construct the full FFmpeg command line."""
         cmd = [self.ffmpeg_bin, "-y", "-loglevel", "error", "-nostats"]
 
-        # Input options - handle lavfi sources
+        # Input options - handle lavfi sources, still images, looping video
         for inp in inputs:
             if inp.startswith("color=") or inp.startswith("anullsrc"):
                 cmd.extend(["-f", "lavfi", "-i", inp])
+            elif self._is_image(inp):
+                cmd.extend(["-loop", "1", "-i", inp])
+            elif self._should_loop_video(inp):
+                cmd.extend(["-stream_loop", "-1", "-i", inp])
             else:
                 cmd.extend(["-i", inp])
 

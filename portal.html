@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TCAP Media</title>
+  <style>
+    :root {
+      --bg: #04060a;
+      --panel: #0b0e14;
+      --fg: #e8ecf4;
+      --muted: #7a8499;
+      --teal: #1fc8b8;
+      --amber: #f5a623;
+      --border: #1f2a3a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      background: radial-gradient(900px 500px at 50% 0%, rgba(31,200,184,0.1), transparent 60%), var(--bg);
+      color: var(--fg);
+      font-family: var(--sans);
+    }
+    .shell { width: min(720px, 100%); }
+    h1 { font-size: 28px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 14px; margin-bottom: 28px; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    a.card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+    a.card:hover { border-color: var(--teal); transform: translateY(-2px); }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 12px;
+    }
+    .title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .desc { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .status {
+      margin-top: 24px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+      line-height: 1.6;
+    }
+    .ok { color: var(--teal); }
+    .bad { color: #ff5c5c; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>TCAP Media</h1>
+    <div class="sub">ChristmanVideoEngine + ChristmanImageEngine — one local stack. Public repos stay separate; this portal is your unified cockpit.</div>
+    <div class="grid">
+      <a class="card" href="/video">
+        <div class="eyebrow">ChristmanVideoEngine</div>
+        <div class="title">Video</div>
+        <div class="desc">Prompt → render, auto-edit, highlights, montage. FFmpeg pipeline with Christman Voice SDK.</div>
+      </a>
+      <a class="card" href="/image">
+        <div class="eyebrow">ChristmanImageEngine</div>
+        <div class="title">Image</div>
+        <div class="desc">Local SDXL stills for social and B-roll. Exports into video assets automatically.</div>
+      </a>
+      <a class="card" href="/vega">
+        <div class="eyebrow">Vega</div>
+        <div class="title">Marketing PR</div>
+        <div class="desc">FRS blueprint, HSO content queue, 4 slots/day. Uses CVE + CIE — not voice training.</div>
+      </a>
+    </div>
+    <div class="status" id="status">checking engines…</div>
+  </div>
+  <script>
+    async function check(url, label) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (!r.ok) return `${label}: offline`;
+        const j = await r.json();
+        return `${label}: <span class="ok">${j.engine || j.status}</span>`;
+      } catch {
+        return `${label}: <span class="bad">offline</span>`;
+      }
+    }
+    Promise.all([
+      check("/api/health", "video"),
+      check("/image/api/health", "image"),
+      check("/api/vega/status", "vega"),
+    ]).then((lines) => {
+      document.getElementById("status").innerHTML = lines.join(" · ");
+    });
+  </script>
+</body>
+</html>

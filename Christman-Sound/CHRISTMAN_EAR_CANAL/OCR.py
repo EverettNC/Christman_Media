@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 import asyncio
-from .._paths import ensure_family_paths, require_file
+from ._paths import ensure_family_paths, require_file
 from audio.config import get_config
 
 def _get_ocr_engine(being: str):
@@ -12,11 +12,7 @@ def _get_ocr_engine(being: str):
     from christman_ocr_shared import ChristmanOCR
     config = get_config()
     # Inject config settings: num_workers, device acceleration, etc.
-    return ChristmanOCR(
-        being_name=being,
-        device=config.get("system.device"),
-        workers=config.get("system.num_workers")
-    )
+    return ChristmanOCR(being_name=being)
 
 def scan_document(path: str | Path, being: str = "Derek") -> Dict[str, Any]:
     ensure_family_paths()

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Everett's one-command TCAP Media launcher (Video + Image on :8618)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+exec python3 tcap_media.py "$@"

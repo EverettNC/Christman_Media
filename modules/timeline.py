@@ -135,7 +135,7 @@ STEAMPUNK_THEME = Theme(
     name="steampunk",
     filter_chain=(
         "colorchannelmixer=rr=1.2:rg=0.1:rb=0.1,"
-        "eq=contrast=1.2:saturation=1.3,"
+        "eq=contrast=1.15:brightness=0.14:saturation=1.25,"
         "curves=preset=medium_contrast"
     )
 )
@@ -144,7 +144,6 @@ CINEMA_THEME = Theme(
     name="cinema",
     filter_chain=(
         "eq=contrast=1.15:saturation=1.1,"
-        "curves=preset=film,"
         "colorlevels=rimin=0.02:gimin=0.02:bimin=0.02"
     )
 )
@@ -213,16 +212,52 @@ class Timeline:
         return warnings
 
 
+def _short_title(text: str, max_len: int = 80, *, fallback: str = "") -> str:
+    """First meaningful line for on-screen title — not the full document."""
+    try:
+        from engine.document_ingest import document_display_title
+
+        return document_display_title(text, fallback=fallback)
+    except Exception:
+        pass
+    for line in text.splitlines():
+        s = line.strip()
+        if s and len(s) > 3:
+            if len(s) <= max_len:
+                return s
+            return s[: max_len - 1].rsplit(" ", 1)[0] + "…"
+    return "Untitled"
+
+
+def _narration_excerpt(text: str, *, max_chars: int = 500) -> str:
+    body = (text or "").strip()
+    if not body:
+        return "Welcome to today's lesson."
+    if len(body) <= max_chars:
+        return body
+    return body[: max_chars - 1].rsplit(" ", 1)[0] + "…"
+
+
 # Example: Building a lesson timeline programmatically
 def create_lesson_template(
     title: str,
     voice_being: str = "derek",
-    theme: Theme = STEAMPUNK_THEME
+    theme: Theme = STEAMPUNK_THEME,
+    broll_image: Optional[str] = None,
+    *,
+    target_duration: float = 60.0,
+    display_title: Optional[str] = None,
+    overlay_image: Optional[str] = None,
 ) -> Timeline:
     """Create a standard lesson video template."""
     tl = Timeline(theme=theme)
+    display_title = (display_title or _short_title(title)).strip() or "Untitled"
+    # ~14 spoken chars/sec; cap narration to fit requested render length
+    narr_budget = max(500, min(4000, int(target_duration * 14)))
+    narration = _narration_excerpt(title, max_chars=narr_budget)
+    narr_secs = min(target_duration * 0.85, max(4.0, len(narration) / 14.0))
 
-    # Video track: background + title overlay
+    # Video track: background + optional CIE still + title overlay
     video = Track(TrackType.VIDEO)
     video.add_clip(Clip(
         source="assets/backgrounds/steampunk_classroom.mp4",
@@ -230,12 +265,29 @@ def create_lesson_template(
         duration=None,  # Full loop - handled by stream_loop on input
         scale_mode="fill"
     ))
+    if broll_image:
+        video.add_clip(Clip(
+            source=broll_image,
+            start=0.5,
+            duration=6.0,
+            scale_mode="fill",
+            transition=TransitionType.FADE,
+            transition_duration=0.8,
+        ))
+    if overlay_image:
+        video.add_clip(Clip(
+            source=overlay_image,
+            start=0,
+            duration=None,
+            scale_mode="fill",
+            opacity=1.0,
+        ))
     video.add_clip(Clip(
-        source="TTS:" + title,
+        source="TTS:" + display_title,
         start=1.0,
         duration=4.0,
         scale_mode="fit",
-        tts_text=title,
+        tts_text=display_title,
         tts_voice=voice_being,
         tts_emotion="sweetheart",
         transition=TransitionType.FADE,
@@ -243,26 +295,25 @@ def create_lesson_template(
     ))
     tl.add_track(video)
 
-    # TTS track: main narration
+    # TTS track: narrate document / prompt (not a hardcoded placeholder)
     tts = Track(TrackType.TTS)
     tts.add_clip(Clip(
-        source="TTS:Welcome to today's lesson.",
+        source="TTS:" + narration,
         start=2.0,
-        duration=3.0,
-        tts_text="Welcome to today's lesson.",
+        duration=narr_secs,
+        tts_text=narration,
         tts_voice=voice_being,
-        tts_emotion="warm"
+        tts_emotion="warm",
     ))
     tl.add_track(tts)
 
-    # Subtitle track
     sub = Track(TrackType.SUBTITLE)
     sub.add_clip(Clip(
         source="",
         start=2.0,
-        duration=3.0,
-        subtitle_text="Welcome to today's lesson.",
-        subtitle_style={"fontsize": 48, "color": "white", "outline": 2}
+        duration=narr_secs,
+        subtitle_text=narration[:120],
+        subtitle_style={"fontsize": 48, "color": "white", "outline": 2},
     ))
     tl.add_track(sub)
 
